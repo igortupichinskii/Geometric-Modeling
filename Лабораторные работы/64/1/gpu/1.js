@@ -212,18 +212,40 @@ const Data = {
         let i, j;
         let pt;
         let t, x, y, dt, omega;
-
+        let n = this.pointsCtr.length;
+        let d = new Array(n-1);
+        for (i=1; i < n; i++) {
+            d[i-1] = Math.sqrt(Math.pow(this.pointsCtr[i].x - this.pointsCtr[i-1].x, 2) + Math.pow(this.pointsCtr[i].y - this.pointsCtr[i-1].y, 2))
+        }
+        let sum_d = 0;
+        for (i = 0; i < n-1; i++){
+            sum_d += d[i];
+        }
+        let d2 = new Array(n-1);
+        for (i=1; i < n; i++) {
+            d2[i-1] = Math.sqrt(Math.sqrt(Math.pow(this.pointsCtr[i].x - this.pointsCtr[i-1].x, 2) + Math.pow(this.pointsCtr[i].y - this.pointsCtr[i-1].y, 2)))
+        }
+        let sum_d2 = 0;
+        for (i = 0; i < n-1; i++){
+            sum_d2 += d2[i];
+        }
         // РАССЧИТАТЬ ЗНАЧЕНИЕ ПАРАМЕТРИЧЕСКИХ КООРДИНАТ КОНТРОЛЬНЫХ ТОЧЕК
-		for (i = 1; i < this.pointsCtr.length; i++)
         switch (this.controlsParameters.paramCoords) {
         case "uniform":
-			//this.pointsCtr[i].t = ;
+            for (i = 1; i < n; i++) {
+                this.pointsCtr[i].t = i / (n - 1);
+            }
+			
 			break;
         case "chordal":
-			//this.pointsCtr[i].t = ;
+			for (i = 1; i < n; i++) {
+                this.pointsCtr[i].t = this.pointsCtr[i-1].t + d[i-1] / sum_d;
+            }
 			break;
         case "centripetal":
-			//this.pointsCtr[i].t = ;
+			for (i = 1; i < n; i++) {
+                this.pointsCtr[i].t = this.pointsCtr[i-1].t + d2[i-1] / sum_d2;
+            }
 			break;
 		}
 
@@ -269,6 +291,7 @@ const Data = {
             }) : None
 
         // Create compute buffers
+        const SIZE_1 = 4*n;
         const pointsCtrBuffer = device.createBuffer({
             mappedAtCreation: true,
             // ЗАДАТЬ РАЗМЕР БУФЕРА КОНТРОЛЬНЫХ ТОЧЕК <SIZE_1>
@@ -279,6 +302,7 @@ const Data = {
         const pointsCtrRange = pointsCtrBuffer.getMappedRange();
 
         // Create compute buffers
+        const SIZE_2 = 4*N;
         const pointsSplineBuffer = device.createBuffer({
             mappedAtCreation: true,
             // ЗАДАТЬ РАЗМЕР БУФЕРА ТОЧЕК СПЛАЙНА <SIZE_2>
@@ -291,12 +315,19 @@ const Data = {
 
         // Create the data arrays
         // ЗАДАТЬ РАЗМЕР МАССИВА КОНТРОЛЬНЫХ ТОЧЕК <SIZE_3>
+        const SIZE_3 = 4*n;
         const pointsCtrArray = new Array(SIZE_3);
         // ЗАДАТЬ РАЗМЕР МАССИВА ТОЧЕК СПЛАЙНА <SIZE_4>
+        const SIZE_4 = 4*N;
         const pointsSplineArray = new Array(SIZE_4);
 
         // ЗАПОЛНИТЬ МАССИВ КОНТРОЛЬНЫХ ТОЧЕК pointsCtrArray
-        // pointsSplineArray[i] = this.pointsCtr[i].x;
+        for (i = 0; i < n; i++) {
+            pointsCtrArray[4*i] = this.pointsCtr[i].x;
+            pointsCtrArray[4*i + 1] = this.pointsCtr[i].y;
+            pointsCtrArray[4*i + 2] = this.pointsCtr[i].t;
+            pointsCtrArray[4*i + 3] = 0;
+        }
 
         pointsSplineArray.fill(0.0);
 
@@ -308,11 +339,23 @@ const Data = {
         pointsCtrBuffer.unmap();
         pointsSplineBuffer.unmap();
 
+        // console.log(this.shaderCode);
         // Create the shader module
         const shaderModule = device.createShaderModule({
             label: "Shader module 0",
             code: this.shaderCode
         });
+
+        const info = await shaderModule.getCompilationInfo();
+
+        for (const msg of info.messages) {
+            console.log(
+                msg.type,
+                msg.lineNum,
+                msg.linePos,
+                msg.message
+            );
+        }
 
         // Create the compute pass encoder
         const computePass = timeSupport ?
@@ -333,7 +376,8 @@ const Data = {
                 entryPoint: "computeMain",
                 constants: {
                     group_size: 256,
-                    // ПЕРЕДАТЬ НЕОБХОДИМЫЕ КОНСТАНТЫ В ШЕЙДЕР
+                    num_points_spline: N,
+                    num_ctr_points: n
                 }
             }
         });
@@ -360,6 +404,7 @@ const Data = {
 
         // Encode compute commands
         // ЗАДАТЬ <SIZE_5>
+        const SIZE_5 = Math.ceil(N / 256)
         computePass.dispatchWorkgroups(SIZE_5);
 
         // Complete encoding compute commands
@@ -386,7 +431,7 @@ const Data = {
         // Create mappable buffer for spline points
         const mappableBuffer = device.createBuffer({
         // ОПРЕДЕЛИТЬ <SIZE_5>
-        size: SIZE_5,
+        size: 4*SIZE_2,
         usage:
             GPUBufferUsage.COPY_DST |
             GPUBufferUsage.MAP_READ
@@ -394,6 +439,7 @@ const Data = {
 
         // Encode copy command for spline points
         // ОПРЕДЕЛИТЬ <SIZE_6>
+        const SIZE_6 = 4 * SIZE_2;
         encoder.copyBufferToBuffer(pointsSplineBuffer, 0, mappableBuffer, 0, SIZE_6);
 
         // Submit the commands to the GPU
@@ -407,11 +453,12 @@ const Data = {
         this.pointsSpline = new Array(N);
 
         // СЧИТАТЬ РАССЧИТАННЫЕ ДАННЫЕ
-        // x = resData[0];
-        // y = resData[1];
-        // pt = new Point(x, y);
-        // this.pointsSpline[j]=pt;
-
+        for (j=0; j < N; j++){
+            x = resData[4*j];
+            y = resData[4*j + 1];
+            pt = new Point(x, y);
+            this.pointsSpline[j]=pt;
+        }
         // Destroy the mapping
         mappableBuffer.unmap();
 

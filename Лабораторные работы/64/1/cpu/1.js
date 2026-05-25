@@ -43,6 +43,7 @@ class Point {
         this.select = false;
         this.x = x;
         this.y = y;
+        this.t = 0;
         this.setRect();
     }
     setPoint(x, y) {
@@ -202,17 +203,40 @@ const Data = {
         let i, j;
         let pt;
         let t, x, y, dt, omega;
-
+        let n = this.pointsCtr.length;
+        let d = new Array(n-1);
+        for (i=1; i < n; i++) {
+            d[i-1] = Math.sqrt(Math.pow(this.pointsCtr[i].x - this.pointsCtr[i-1].x, 2) + Math.pow(this.pointsCtr[i].y - this.pointsCtr[i-1].y, 2))
+        }
+        let sum_d = 0;
+        for (i = 0; i < n-1; i++){
+            sum_d += d[i];
+        }
+        let d2 = new Array(n-1);
+        for (i=1; i < n; i++) {
+            d2[i-1] = Math.sqrt(Math.sqrt(Math.pow(this.pointsCtr[i].x - this.pointsCtr[i-1].x, 2) + Math.pow(this.pointsCtr[i].y - this.pointsCtr[i-1].y, 2)))
+        }
+        let sum_d2 = 0;
+        for (i = 0; i < n-1; i++){
+            sum_d2 += d2[i];
+        }
         // РАССЧИТАТЬ ЗНАЧЕНИЕ ПАРАМЕТРИЧЕСКИХ КООРДИНАТ КОНТРОЛЬНЫХ ТОЧЕК
 		switch (this.controlsParameters.paramCoords) {
         case "uniform":
-			//this.pointsCtr[i].t = ;
+            for (i = 1; i < n; i++) {
+                this.pointsCtr[i].t = i / (n - 1);
+            }
+			
 			break;
         case "chordal":
-			//this.pointsCtr[i].t = ;
+			for (i = 1; i < n; i++) {
+                this.pointsCtr[i].t = this.pointsCtr[i-1].t + d[i-1] / sum_d;
+            }
 			break;
         case "centripetal":
-			//this.pointsCtr[i].t = ;
+            for (i = 1; i < n; i++) {
+                this.pointsCtr[i].t = this.pointsCtr[i-1].t + d2[i-1] / sum_d2;
+            }
 			break;
 		}
 
@@ -220,9 +244,24 @@ const Data = {
         this.pointsSpline = new Array(N);
 
         // РАСЧЕТ КООРДИНАТ ТОЧКИ СПЛАЙНА
-
-        //pt = new Point(x, y);
-        //this.pointsSpline[j]=pt;
+        dt = 1 / (N-1);
+        t = 0;
+        j = 0;
+        while (t <= 1) {
+            for (i=0; i < n - 1; i++) {
+                if (t <= this.pointsCtr[i + 1].t) {
+                    omega = (t - this.pointsCtr[i].t) / (this.pointsCtr[i + 1].t - this.pointsCtr[i].t);
+                    x = this.pointsCtr[i].x * (1 - omega) + this.pointsCtr[i+1].x * omega;
+                    y = this.pointsCtr[i].y * (1 - omega) + this.pointsCtr[i+1].y * omega;
+                    break;
+                }
+            }
+            pt = new Point(x, y);
+            this.pointsSpline[j]=pt;
+            t += dt;
+            j++;
+        }
+        
     }
 }
 
