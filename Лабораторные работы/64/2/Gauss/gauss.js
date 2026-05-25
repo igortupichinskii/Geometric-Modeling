@@ -17,8 +17,14 @@ if (!adapter) {
     throw new Error("No GPUAdapter found");
 }
 
+// Check for timestamp support
+const timeSupport = adapter.features.has("timestamp-query");
+
 // Access the client's GPU
-const device = await adapter.requestDevice();
+const device = timeSupport ?
+    await adapter.requestDevice({ 
+        requiredFeatures: ["timestamp-query"] }) :
+    await adapter.requestDevice();
 if (!device) {
     throw new Error("Failed to create a GPUDevice");
 }
@@ -29,8 +35,23 @@ if (!encoder) {
     throw new Error("Failed to create a GPUCommandEncoder");
 }
 
+// Create the query set
+const querySet = timeSupport ?
+    device.createQuerySet({
+        label: "Query Set",
+        count: 2,
+        type: "timestamp"
+    }) : None;
+
+// Create the query buffer
+const queryBuffer = timeSupport ?
+    device.createBuffer({
+        size: querySet.count * BigInt64Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC
+    }) : None
+
 // Set parameters
-const matrixDim = 3;
+const matrixDim = 16;
 const buffSize = matrixDim * matrixDim * 4;
 
 // Create buffer containing A matrix
@@ -93,9 +114,14 @@ const shaderModule = device.createShaderModule({
 });
 
 // Create the compute pass encoder
-const computePass = encoder.beginComputePass({
-    label: "Compute Pass 0"
-});
+const computePass = timeSupport ?
+    encoder.beginComputePass({
+        timestampWrites: {
+            querySet,
+            beginningOfPassWriteIndex: 0,
+            endOfPassWriteIndex: 1
+        }}) :
+    encoder.beginComputePass({});
 
 // Define the compute procedure
 const computePipeline = device.createComputePipeline({
@@ -138,6 +164,24 @@ computePass.dispatchWorkgroups(1);
 // Complete encoding compute commands
 computePass.end();
 
+// Create buffer to hold timestamp results
+const tsBuffer = timeSupport ?
+    device.createBuffer({
+        size: querySet.count * BigInt64Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    }) : None;
+
+if (timeSupport) {
+    
+    // Encode timestamp query command
+    encoder.resolveQuerySet(querySet,
+        0, querySet.count, queryBuffer, 0);
+    
+    // Encode command to copy timestamp data
+    encoder.copyBufferToBuffer(queryBuffer, 0, tsBuffer, 0, 
+        querySet.count * BigInt64Array.BYTES_PER_ELEMENT);
+}
+
 // Create mappable buffer for x vector
 const mappableBufferX = device.createBuffer({
   size: matrixDim * 4,
@@ -154,9 +198,18 @@ const mappableBufferA = device.createBuffer({
       GPUBufferUsage.MAP_READ
 });
 
+// Create mappable buffer for b vector
+const mappableBufferB = device.createBuffer({
+  size: matrixDim * 4,
+  usage: 
+      GPUBufferUsage.COPY_DST | 
+      GPUBufferUsage.MAP_READ
+});
+
 // Encode copy commands
 encoder.copyBufferToBuffer(xBuffer, 0, mappableBufferX, 0, matrixDim * 4);
 encoder.copyBufferToBuffer(aBuffer, 0, mappableBufferA, 0, buffSize);
+encoder.copyBufferToBuffer(bBuffer, 0, mappableBufferB, 0, matrixDim * 4);
 
 // Submit the commands to the GPU
 device.queue.submit([encoder.finish()]);
@@ -166,18 +219,18 @@ await mappableBufferA.mapAsync(GPUMapMode.READ);
 const dataA = mappableBufferA.getMappedRange();
 const floatDataA = new Float32Array(dataA);
 
-console.log(floatDataA);
+// Read data from b buffer
+await mappableBufferB.mapAsync(GPUMapMode.READ);
+const dataB = mappableBufferB.getMappedRange();
+const floatDataB = new Float32Array(dataB);
+
+// console.log(floatDataA, floatDataB);
 
 // Read data from x buffer
 await mappableBufferX.mapAsync(GPUMapMode.READ);
 const dataX = mappableBufferX.getMappedRange();
 const floatDataX = new Float32Array(dataX);
-
-// // Read data from A buffer (now contains the R matrix)
-// await mappableBufferR.mapAsync(GPUMapMode.READ);
-// const procDataR = mappableBufferR.getMappedRange();
-// const floatDataR = new Float32Array(procDataR);
-
+console.log(floatDataX, xVector);
 // Check that Ax - b = 0
 let checkMat = true;
 let sum;
@@ -196,9 +249,28 @@ for(let i = 0; i < matrixDim; i++) {
 const outputMsg = checkMat ? "Gauss solver check passed" : "Gauss solver check failed";
 document.getElementById("output").innerHTML = outputMsg;
 
+if (timeSupport) {
+    
+    // Read data from compute buffer
+    await tsBuffer.mapAsync(GPUMapMode.READ);
+    const mapData = tsBuffer.getMappedRange();
+    const tsData = new BigInt64Array(mapData);
+    
+    // Display output in page
+    const t1 = Number(tsData[0]) / 1000000.0;
+    const t2 = Number(tsData[1]) / 1000000.0;    
+    const t = t2 - t1;
+    const tsMsg = "Time: ".concat(t2.toString()).concat(" - ").concat(t1.toString()).concat(" = ");
+    document.getElementById("timestamp").innerHTML = tsMsg.concat(t.toString());
+    
+    // Destroy the mapping
+    tsBuffer.unmap();
+}
+
 // Destroy the mapping
-mappableBufferX.unmap();
 mappableBufferA.unmap();
+mappableBufferB.unmap();
+mappableBufferX.unmap();
 }
 
 // Run example function
