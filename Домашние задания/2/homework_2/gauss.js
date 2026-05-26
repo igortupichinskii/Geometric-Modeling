@@ -248,7 +248,7 @@ for(let i = 0; i < matrixDim; i++) {
 }
 
 // Display output in page
-const outputMsg = checkMat ? "Gauss solver check passed" : "Gauss solver check failed";
+const outputMsg = checkMat ? "Gauss-Seidel solver check passed" : "Gaus-Seidel solver check failed";
 document.getElementById("output").innerHTML = outputMsg;
 
 if (timeSupport) {

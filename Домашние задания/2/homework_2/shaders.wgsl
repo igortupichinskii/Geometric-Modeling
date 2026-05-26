@@ -70,6 +70,9 @@ fn computeMain(@builtin(global_invocation_id) gid : vec3<u32>) {
             
         }
         workgroupBarrier();
-        if (residual <= eps) { break; }
+        let r : f32 = workgroupUniformLoad(&residual);
+        if (r <= eps) {
+            break;
+        }
     }
 }
