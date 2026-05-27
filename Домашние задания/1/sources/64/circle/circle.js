@@ -32,7 +32,7 @@ async function main() {
 	guiCtrPointsParams.add(Data.controlsParameters, 'controlPolygon').onChange(function (e) { Data.draw(); });
 	
 	guiSplineParams.add(Data.controlsParameters, 'spline').onChange(function (e) { Data.calculateSplineAndDraw(); });
-	guiSplineParams.add(Data.controlsParameters, 'countSplinePoints', 1, 7e6, 1).onChange(function (e) { Data.calculateSplineAndDraw(); });
+	guiSplineParams.add(Data.controlsParameters, 'countSplinePoints', 2, 7e6, 1).onChange(function (e) { Data.calculateSplineAndDraw(); });
 	guiSplineParams.add(Data.controlsParameters, 'visualize', ["points", "line"]).onChange(function (e) { Data.draw(); });
 
     Data.init(canvas, ctx, shaderCode);
@@ -108,7 +108,7 @@ const Data = {
 		this.controlsParameters.radius = canvas.height / 4;
 
         //ЗАДАТЬ КОЛИЧЕСТВО КОНТРОЛЬНЫХ ТОЧЕК
-        this.countCtrPoints = 0;
+        this.countCtrPoints = 7;
 
         this.setCountCtrPoints();
     },
@@ -241,7 +241,13 @@ const Data = {
         const r =  this.controlsParameters.radius;
 
         // ЗАДАТЬ КООРДИНАТЫ КОНТРОЛЬНЫХ ТОЧЕК
-        // this.pointsCtr[0].setPoint(x0 + r, y0, 1);
+        this.pointsCtr[0].setPoint(x0 + r, y0, 1);
+        this.pointsCtr[1].setPoint(x0 + r, y0 + r, 1/2);
+        this.pointsCtr[2].setPoint(x0 - r, y0 + r, 1/2);
+        this.pointsCtr[3].setPoint(x0 - r, y0, 1);
+        this.pointsCtr[4].setPoint(x0 - r, y0 - r, 1/2);
+        this.pointsCtr[5].setPoint(x0 + r, y0 - r, 1/2);
+        this.pointsCtr[6].setPoint(x0 + r, y0, 1);
 
         this.draw();
     },
@@ -292,6 +298,7 @@ const Data = {
             }) : None
 
         // Create compute buffers
+        const SIZE_1 = 4 * this.countCtrPoints;
         const pointsCtrBuffer = device.createBuffer({
             mappedAtCreation: true,
             // ЗАДАТЬ РАЗМЕР БУФЕРА КОНТРОЛЬНЫХ ТОЧЕК <SIZE_1>
@@ -302,6 +309,7 @@ const Data = {
         const pointsCtrRange = pointsCtrBuffer.getMappedRange();
 
         // Create compute buffers
+        const SIZE_2 = 4 * N;
         const pointsSplineBuffer = device.createBuffer({
             mappedAtCreation: true,
             // ЗАДАТЬ РАЗМЕР БУФЕРА ТОЧЕК СПЛАЙНА <SIZE_2>
@@ -314,12 +322,17 @@ const Data = {
 
         // Create the data arrays
         // ЗАДАТЬ РАЗМЕР МАССИВА КОНТРОЛЬНЫХ ТОЧЕК <SIZE_3>
-        const pointsCtrArray = new Array(SIZE_3);
+        const pointsCtrArray = new Array(SIZE_1);
         // ЗАДАТЬ РАЗМЕР МАССИВА ТОЧЕК СПЛАЙНА <SIZE_4>
-        const pointsSplineArray = new Array(SIZE_4);
+        const pointsSplineArray = new Array(SIZE_2);
 
         // ЗАПОЛНИТЬ МАССИВ КОНТРОЛЬНЫХ ТОЧЕК pointsCtrArray
-        // pointsSplineArray[i] = this.pointsCtr[i].x;
+        for (var i = 0; i < this.countCtrPoints; i += 1){
+            pointsCtrArray[i * 4] = this.pointsCtr[i].x;
+            pointsCtrArray[i * 4 + 1] = this.pointsCtr[i].y;
+            pointsCtrArray[i * 4 + 2] = this.pointsCtr[i].h;
+            pointsCtrArray[i * 4 + 3] = 0;
+        }
 
         pointsSplineArray.fill(0.0);
 
@@ -356,7 +369,8 @@ const Data = {
                 entryPoint: "computeMain",
                 constants: {
                     group_size: 256,
-                    // ПЕРЕДАТЬ НЕОБХОДИМЫЕ КОНСТАНТЫ В ШЕЙДЕР
+                    num_spline_pt: N,
+                    num_ctr_pt: 7
                 }
             }
         });
@@ -382,7 +396,7 @@ const Data = {
         computePass.setBindGroup(0, bindGroup);
 
         // Encode compute commands
-        // ЗАДАТЬ <SIZE_5>
+        const SIZE_5 = Math.ceil(N / 256);
         computePass.dispatchWorkgroups(SIZE_5);
 
         // Complete encoding compute commands
@@ -409,14 +423,14 @@ const Data = {
         // Create mappable buffer for spline points
         const mappableBuffer = device.createBuffer({
         // ОПРЕДЕЛИТЬ <SIZE_5>
-        size: SIZE_5,
+        size: 4 * SIZE_2,
         usage:
             GPUBufferUsage.COPY_DST |
             GPUBufferUsage.MAP_READ
         });
 
         // Encode copy command for spline points
-        // ОПРЕДЕЛИТЬ <SIZE_6>
+        const SIZE_6 = 4 * SIZE_2;
         encoder.copyBufferToBuffer(pointsSplineBuffer, 0, mappableBuffer, 0, SIZE_6);
 
         // Submit the commands to the GPU
@@ -429,11 +443,13 @@ const Data = {
 
         this.pointsSpline = new Array(N);
 
-        // СЧИТАТЬ РАССЧИТАННЫЕ ДАННЫЕ
-        // x = resData[0];
-        // y = resData[1];
-        // pt = new Point(x, y);
-        // this.pointsSpline[j]=pt;
+        for (let j = 0; j < N; j++) {
+            x = resData[j * 4];
+            y = resData[j * 4 + 1];
+
+            pt = new Point(x, y);
+            this.pointsSpline[j] = pt;
+        }
 
         const tgpu2 = Date.now();
 
@@ -457,11 +473,6 @@ const Data = {
             // Destroy the mapping
             tsBuffer.unmap();
         }
-
-        // РАСЧЕТ КООРДИНАТ ТОЧКИ СПЛАЙНА
-
-        //pt = new Point(x, y);
-        //this.pointsSpline[j]=pt;
     }
 }
 
